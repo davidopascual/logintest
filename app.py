@@ -1,14 +1,14 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
-from flask_mail import Mail, Message
-from flask_session import Session  # Add for server-side sessions
-from werkzeug.security import generate_password_hash, check_password_hash
-import psycopg2
-from psycopg2 import pool
 import os
 import random
 import string
 import logging
-import redis  # For session storage
+from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask_mail import Mail, Message
+from flask_session import Session
+from werkzeug.security import generate_password_hash, check_password_hash
+import psycopg2
+from psycopg2 import pool
+import redis
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -31,15 +31,11 @@ app.config['SESSION_TYPE'] = 'redis'
 app.config['SESSION_REDIS'] = redis.from_url(os.getenv('REDIS_URL', 'redis://localhost:6379'))
 Session(app)
 
+# Use Heroku's DATABASE_URL for PostgreSQL connection
+DATABASE_URL = os.getenv('DATABASE_URL')
+
 # PostgreSQL connection pool
-db_config = {
-    'dbname': os.getenv('DB_NAME'),
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD'),
-    'host': os.getenv('DB_HOST'),
-    'port': os.getenv('DB_PORT', '5432')
-}
-db_pool = psycopg2.pool.SimpleConnectionPool(1, 20, **db_config)
+db_pool = psycopg2.pool.SimpleConnectionPool(1, 20, DATABASE_URL)
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, filename='app.log', format='%(asctime)s %(levelname)s %(message)s')
@@ -247,5 +243,5 @@ def logout():
     return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    init_db()
+    init_db()  # Initialize the database when the app starts
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
