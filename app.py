@@ -33,10 +33,10 @@ app.config['SESSION_REDIS'] = redis.from_url(os.getenv('REDIS_URL'))
 Session(app)
 
 # Heroku PostgreSQL connection setup
-DATABASE_URL = os.getenv('DATABASE_URL')
-
-# Parse DATABASE_URL
-url = urlparse(DATABASE_URL)
+database_url = os.getenv('DATABASE_URL')
+if not database_url:
+    raise ValueError("DATABASE_URL not set")
+url = urlparse(database_url)
 
 # PostgreSQL connection pool
 db_pool = psycopg2.pool.SimpleConnectionPool(
@@ -45,7 +45,7 @@ db_pool = psycopg2.pool.SimpleConnectionPool(
     password=url.password,
     host=url.hostname,
     port=url.port,
-    database=url.path[1:],  # Remove the leading '/' from the database name
+    database=url.path[1:],  # Remove the leading '/'
     sslmode='require'
 )
 
@@ -114,7 +114,139 @@ def register():
             db_pool.putconn(conn)
     return render_template('register.html')
 
-# Additional routes for login, change_password, forgot_password, etc.
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        email = request.form['email'].strip().lower()
+        password = request.form['password']
+        if not email or not password:
+            flash('Email and password are required!')
+            return render_template('login.html')
+
+        conn = db_pool.getconn()
+        try:
+            with conn.cursor() as c:
+                c.execute("SELECT password FROM users WHERE email = %s", (email,))
+                user = c.fetchone()
+                if user and check_password_hash(user[0], password):
+                    session['email'] = email
+                    logger.info(f"User logged in: {email}")
+                    return redirect(url_for('home'))
+                else:
+                    flash('Invalid email or password!')
+                    logger.warning(f"Login failed for email: {email}")
+        except Exception as e:
+            logger.error(f"Error during login: {e}")
+            flash('An error occurred. Please try again.')
+        finally:
+            db_pool.putconn(conn)
+    return render_template('login.html')
+
+@app.route('/change_password', methods=['GET', 'POST'])
+def change_password():
+    if 'email' not in session:
+        return redirect(url_for('login'))
+    if request.method == 'POST':
+        old_password = request.form['old_password']
+        new_password = request.form['new_password']
+        email = session['email']
+        if not old_password or not new_password:
+            flash('Both passwords are required!')
+            return render_template('change_password.html')
+
+        conn = db_pool.getconn()
+        try:
+            with conn.cursor() as c:
+                c.execute("SELECT password FROM users WHERE email = %s", (email,))
+                stored_password = c.fetchone()
+                if stored_password and check_password_hash(stored_password[0], old_password):
+                    hashed_new_password = generate_password_hash(new_password, method='pbkdf2:sha256')
+                    c.execute("UPDATE users SET password = %s WHERE email = %s", (hashed_new_password, email))
+                    conn.commit()
+                    logger.info(f"Password changed for: {email}")
+                    flash('Password changed successfully!')
+                    return redirect(url_for('home'))
+                else:
+                    flash('Incorrect old password!')
+                    logger.warning(f"Password change failed for {email}: Incorrect old password")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error during password change: {e}")
+            flash('An error occurred. Please try again.')
+        finally:
+            db_pool.putconn(conn)
+    return render_template('change_password.html')
+
+@app.route('/forgot_password', methods=['GET', 'POST'])
+def forgot_password():
+    if request.method == 'POST':
+        email = request.form['email'].strip().lower()
+        if not email:
+            flash('Email is required!')
+            return render_template('forgot_password.html')
+        
+        conn = db_pool.getconn()
+        try:
+            with conn.cursor() as c:
+                c.execute("SELECT id FROM users WHERE email = %s", (email,))
+                user = c.fetchone()
+                if user:
+                    reset_code = generate_reset_code()
+                    c.execute("DELETE FROM reset_codes WHERE email = %s", (email,))
+                    c.execute("INSERT INTO reset_codes (email, code) VALUES (%s, %s)", (email, reset_code))
+                    conn.commit()
+                    
+                    msg = Message("Password Reset Code", recipients=[email])
+                    msg.body = f"Your password reset code is: {reset_code}. Use it to reset your password."
+                    mail.send(msg)
+                    
+                    logger.info(f"Reset code sent to: {email}")
+                    flash('A reset code has been sent to your email.')
+                    return redirect(url_for('reset_password'))
+                else:
+                    flash('Email not found!')
+                    logger.warning(f"Reset password failed: Email {email} not found")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error during forgot password: {e}")
+            flash('An error occurred. Please try again.')
+        finally:
+            db_pool.putconn(conn)
+    return render_template('forgot_password.html')
+
+@app.route('/reset_password', methods=['GET', 'POST'])
+def reset_password():
+    if request.method == 'POST':
+        email = request.form['email'].strip().lower()
+        reset_code = request.form['reset_code']
+        new_password = request.form['new_password']
+        if not all([email, reset_code, new_password]):
+            flash('All fields are required!')
+            return render_template('reset_password.html')
+
+        conn = db_pool.getconn()
+        try:
+            with conn.cursor() as c:
+                c.execute("SELECT code FROM reset_codes WHERE email = %s", (email,))
+                stored_code = c.fetchone()
+                if stored_code and stored_code[0] == reset_code:
+                    hashed_new_password = generate_password_hash(new_password, method='pbkdf2:sha256')
+                    c.execute("UPDATE users SET password = %s WHERE email = %s", (hashed_new_password, email))
+                    c.execute("DELETE FROM reset_codes WHERE email = %s", (email,))
+                    conn.commit()
+                    logger.info(f"Password reset for: {email}")
+                    flash('Password reset successfully! Please log in.')
+                    return redirect(url_for('login'))
+                else:
+                    flash('Invalid reset code or email!')
+                    logger.warning(f"Reset failed for {email}: Invalid code")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error during reset password: {e}")
+            flash('An error occurred. Please try again.')
+        finally:
+            db_pool.putconn(conn)
+    return render_template('reset_password.html')
 
 @app.route('/logout')
 def logout():
@@ -123,5 +255,5 @@ def logout():
     return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    init_db()  # Initialize the database when the app starts
+    init_db()
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
