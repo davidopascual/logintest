@@ -1,0 +1,23 @@
+# Environment variables file
+.env
+
+# Python virtual environment
+venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Logs
+app.log
+
+# Other files you might want to ignore
+*.db
+*.sqlite3
+
+# IDE/editor specific files (if applicable)
+.vscode/
+.idea/
+
+# MacOS specific files
+.DS_Store
