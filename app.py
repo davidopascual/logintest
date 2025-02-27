@@ -10,6 +10,7 @@ import psycopg2
 from psycopg2 import pool
 import redis
 from dotenv import load_dotenv
+from urllib.parse import urlparse
 
 # Load environment variables
 load_dotenv()
@@ -31,11 +32,21 @@ app.config['SESSION_TYPE'] = 'redis'
 app.config['SESSION_REDIS'] = redis.from_url(os.getenv('REDIS_URL', 'redis://localhost:6379'))
 Session(app)
 
-# Use Heroku's DATABASE_URL for PostgreSQL connection
+# Heroku PostgreSQL connection setup
 DATABASE_URL = os.getenv('DATABASE_URL')
 
+# Parse DATABASE_URL
+url = urlparse(DATABASE_URL)
+
 # PostgreSQL connection pool
-db_pool = psycopg2.pool.SimpleConnectionPool(1, 20, DATABASE_URL)
+db_pool = psycopg2.pool.SimpleConnectionPool(
+    1, 20,
+    user=url.username,
+    password=url.password,
+    host=url.hostname,
+    port=url.port,
+    database=url.path[1:]  # Remove the leading '/' from the database name
+)
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, filename='app.log', format='%(asctime)s %(levelname)s %(message)s')
