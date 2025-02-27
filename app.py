@@ -45,7 +45,8 @@ db_pool = psycopg2.pool.SimpleConnectionPool(
     password=url.password,
     host=url.hostname,
     port=url.port,
-    database=url.path[1:]  # Remove the leading '/' from the database name
+    database=url.path[1:],
+    sslmode='require'  # Remove the leading '/' from the database name
 )
 
 # Logging setup
